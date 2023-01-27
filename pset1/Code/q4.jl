@@ -160,39 +160,4 @@ end
 # # test function. fix gamma. 
 Gamma = [1 0; 1 1]
 # println("--\nmarket 1....T")
-t = 1
-market_idx = (df[:,1] .== t)
-
-# Get the data
-s_jt_obs = df[market_idx, 3]
-
-p_jt = df[market_idx, 4]
-x_jt = df[market_idx, 5]
-xtilde_jt = [p_jt x_jt]
-delta_init = similar(delta_init)
-
-s_jt_obs[1] = .20
-
-abc = solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma)
-
-for t = 
-
-
-# # # Objective GMM
-# # function gmm(δ,x,β,z)
-# #     ξ = δ - x'*β
-# #     Sigma = 
-# #     f(β) = ξ'*Sigma*ξ
-# #     β = [1,1,1] #some initialization
-# #     β = optimize(f(β),β)
-# # # Error ξ_jt
-
-# # function error(δ,x,β,z)
-    
-# # end
-
-# # df4 = CSV.read("ps1_ex4.csv", DataFrame)
-
-# # # Inner Loop
-
-# # gamma  = 
+do_delta_loop(df, Gamma, delta_init)
