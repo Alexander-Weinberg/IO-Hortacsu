@@ -1,5 +1,6 @@
 # cd("/Users/Monica/Documents/UChicago/Classes/Industrial Organization II")
 # cd("/Users/Monica/Downloads/IO-Hortacsu-main/pset1")
+# println(size(delta_jt),typeof(delta_jt),delta_jt)
 
 # ================================ #
 # LOAD PACKAGES
@@ -13,8 +14,8 @@ Ns = 50
 
 # NUMPARAM
 delta_init      = ones(J,1) ./ J
-tol_delta       = 1e-14
-max_iter_delta  = 1000
+tol_delta       = 1e-8
+max_iter_delta  = 10000
 
 v_mat           = randn(2,Ns)
 
@@ -87,7 +88,7 @@ function update_delta(delta_old_jt, s_jt_obs, xtilde_jt, Gamma)
     return delta_new_jt
 end
 
-function solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma)
+function solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma, verbose=false)
 
     # Initialize 
     diff_delta   = 100
@@ -107,19 +108,21 @@ function solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma)
         delta_old_jt = delta_new_jt
 
         if diff_delta < tol_delta
-            # println("Solved for δ_jt in $iter_d iterations. Difference is $diff_delta")
+            if verbose
+                println("Solved for δ_jt in $iter_d iterations. Difference is $diff_delta")
+            end
             break
         end
 
         # UPDATE
-        if iter_d % 200 == 0
+        if iter_d % 200 == 0 && verbose
             print("Current iteration is $iter_d. Diff = $diff_delta.\n")  
         end
  
     end
 
     if iter_d == max_iter_delta
-        println("Did not solve for delta. Difference is $diff_delta.\n---\n")
+        @warn "Did not solve for delta. Difference is $diff_delta."
     end
 
     return delta_new_jt
@@ -130,13 +133,15 @@ end
 # ================================ #
 # LOOP OVER MARKETS
 # ================================ #
-function do_delta_loop(df, Gamma, delta_init)
+function do_delta_loop(df, Gamma, delta_init, verbose=false)
 
     delt_mat = zeros(T,J)
 
     for t in 1:T
-        # market index
-        # println("---\nNow solving market $t/$T")
+        if verbose
+            # market index
+            println("---\nNow solving market $t/$T")
+        end
         market_idx = (df[:,1] .== t)
 
         # Get the data
@@ -147,13 +152,14 @@ function do_delta_loop(df, Gamma, delta_init)
         xtilde_jt = [p_jt x_jt]
 
         # solve for delta_jt
-        delt_mat[t, :] = transpose(solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma))
+        delt_mat[t, :] = transpose(solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma, verbose))
     end
     delt_vec = vec(transpose(delt_mat))
     return delt_vec
 end
 
 function do_GMM_objective(Gamma_vec)
+    println("Now evaluating obj function.")
     # Build Gamma matrix
     Gamma_11 = Gamma_vec[1]
     Gamma_21 = Gamma_vec[2]
@@ -173,16 +179,23 @@ function do_GMM_objective(Gamma_vec)
     # ξ_jt = residuals(model)
 
     # Manual 2SLS 
-    firststage      = lm(@formula(p ~ z1 + z2 + z3 + z4 + z5 + z6), data)
+    # TODO: MAKE THIS JUST MATRIX
+    firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
     p_hat           = predict(firststage)
     data[!,"phat"]  = p_hat
     ols             = lm(@formula(delta_jt ~ x + phat), data)
     ξ_jt            = residuals(ols)
 
-    Z = Matrix(df[:,6:11])
-    Ω = inv(transpose(Z)*Z)
-    objective = (transpose(ξ_jt)*Z)*Ω*(transpose(Z)*ξ_jt) 
-    return objective, delta_jt
+    Z               = Matrix(df[:,6:11])
+    Ω_inv           = inv(transpose(Z)*Z)                         # homoskedasticity
+    objective       = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
+
+    # robust 
+    if isnan(objective)
+        objective = 1e10
+    end
+    
+    return objective
 end
 
 # function add_df_to_GMM(Gamma)
@@ -196,57 +209,90 @@ function do_GMM(Gamma_init)
 end
 
 
-## TESTING TO FIND PROBLEM WITH Γ
 
+
+# TESTING THE OPTIMIZER
+Gamma_init = [1.0,1.0,1.0]  
+Sol = optimize(do_GMM_objective, Gamma_init)
+Optim.minimizer(Sol)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## TESTING TO FIND PROBLEM WITH Γ
 Gamma_vec = [1.0,1.0,1.0]  
 Gamma_21 = Gamma_vec[2]
 Gamma_22 = Gamma_vec[3]
 
+# Data
+t                       = 1
+market_idx              = (df[:,1] .== t)
+p_jt                    = df[market_idx, 4]
+x_jt                    = df[market_idx, 5]
+s_jt_obs                = df[market_idx, 3]
+xtilde_jt               = [p_jt x_jt]
+
+# s_jt_obs[2]             = 0.01
+
 # STORAGE 
 obj = []
-delta_tester = zeros(J*T,3)
+delta_tester = zeros(J,3)
 s_tester = zeros(J,3)
+delta_init      = zeros(J,1) ./ J
+delta_init[1]   = 5.0
+dvec_list       = []
 
 for (i, g) in enumerate([1.0, 2.0, 10.0])
     # unpack gamma
-    Gamma_11                = g
-    Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    Gamma_vec               = [g,1.0,1.0]  
+    # Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
 
-    # Test individual share 
-    p_jt                    = df[1:6, 4]
-    x_jt                    = df[1:6, 5]
-    xtilde_jt               = [p_jt x_jt]
-
-    v_i                     = 0.5 .+ zeros(2,1)
-    s_ijt                   = compute_share_jt(delta_init, xtilde_jt, Gamma)
-    s_tester[:,i]           = s_ijt
-
+    # Test 
+    # dvec, dmat              = do_delta_loop(df, Gamma, delta_init, true)
+    # push!(dvec_list,dvec)
 
     # Full function
     obj_val, dvec            = do_GMM_objective(Gamma_vec)
     push!(obj,obj_val) 
-    delta_tester[:,i]       = dvec
+    # delta_tester[:,i]       = dvec
 end
 
-s_tester
+
+
+
+# for monica 
+# tested and the market_share equations look good. 
+# Vary correctly with delta and Gamma (i.e. delta matters less when g big)
+# update delta looks weird. s_jt_obs[5] is 36% but new delta spit out is negative?
+# do delta loop looks good because converges and deltas vary with gamma
+# Objective function spits out a massive number for gamma = 10, small for gamma = 1
+
+# # testing do delta loop
+# print("\nγ_11=1.0, \t2.0, \t10.0\n\n")
+# diff12 = abs.(dvec_list[1] - dvec_list[2])
+# diff13 = abs.(dvec_list[1] - dvec_list[3])
+# did    = diff12 - diff13
 
 
 
 
-println(obj)
-delta_tester
 
 
 
-
-
-
-
-
-
-sol = optimize(do_GMM_objective, Gamma_vec)
+# sol = optimize(do_GMM_objective, Gamma_vec)
 # sol = optimize(do_GMM_objective, Gamma_vec, Optim.Options(show_trace=true, iterations = 100, g_tol = 1e-12), LBFGS())
-Optim.minimizer(sol)
+# Optim.minimizer(sol)
 # optimize(do_GMM_objective(Gamma),Gamma_init,LBFGS())
 
 
