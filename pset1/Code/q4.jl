@@ -1,10 +1,10 @@
 # cd("/Users/Monica/Documents/UChicago/Classes/Industrial Organization II")
-cd("/Users/Monica/Downloads/IO-Hortacsu-main/pset1")
+# cd("/Users/Monica/Downloads/IO-Hortacsu-main/pset1")
 
 # ================================ #
 # LOAD PACKAGES
 # ================================ #
-using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, Econometrics, Optim, BlackBoxOptim
+using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim, BlackBoxOptim
 
 # PARAM
 T = 100
@@ -15,6 +15,9 @@ Ns = 50
 delta_init      = ones(J,1) ./ J
 tol_delta       = 1e-14
 max_iter_delta  = 1000
+
+v_mat           = randn(2,Ns)
+
 
 Random.seed!(04211996)
 
@@ -51,10 +54,6 @@ function compute_share_jt(δ_jt, xtilde_jt, Gamma)
     share_ijt = zeros(Ns,J)
     share_jt  = zeros(1,J)
 
-    # draw shocks
-    v_mat = randn(2,Ns)
-    v_mat = zeros(2,Ns)
-
     for i in 1:Ns
         # Draw shock i
         v_i = v_mat[:,i]
@@ -65,7 +64,7 @@ function compute_share_jt(δ_jt, xtilde_jt, Gamma)
     end
 
     # compute share
-    share_jt = sum(share_ijt, dims=1) ./ Ns
+    share_jt = mean(share_ijt, dims=1) 
 
     return share_jt
 end
@@ -155,29 +154,35 @@ function do_delta_loop(df, Gamma, delta_init)
 end
 
 function do_GMM_objective(Gamma_vec)
+    # Build Gamma matrix
     Gamma_11 = Gamma_vec[1]
     Gamma_21 = Gamma_vec[2]
     Gamma_22 = Gamma_vec[3]
     Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
-    data = df[:,4:11]
-    println("hi1")
-    delta_jt  = do_delta_loop(df,Gamma,delta_init)
-    println("hi2")
-    println(size(delta_jt))
-    data[!,"delta_jt"] = delta_jt
-    print("hi3")
-    # 2sls = 
-    model = fit(EconometricModel, # package specific type
-            @formula(delta_jt  ~ x + (p ~ z1 + z2 + z3 + z4 + z5 + z6)), # @formula(lhs ~ rhs)
-            data # a table
-            )
-    ξ_jt = residuals(model)
-    println("hi4")
+
+    # Get deltas
+    data                    = df[:,4:11]
+    delta_jt                = do_delta_loop(df,Gamma,delta_init)
+    data[!,"delta_jt"]      = delta_jt
+
+    # # 2sls using prespec function
+    # model = fit(EconometricModel, # package specific type
+    #         @formula(delta_jt  ~ x + (p ~ z1 + z2 + z3 + z4 + z5 + z6)), # @formula(lhs ~ rhs)
+    #         data # a table
+    #         )
+    # ξ_jt = residuals(model)
+
+    # Manual 2SLS 
+    firststage      = lm(@formula(p ~ z1 + z2 + z3 + z4 + z5 + z6), data)
+    p_hat           = predict(firststage)
+    data[!,"phat"]  = p_hat
+    ols             = lm(@formula(delta_jt ~ x + phat), data)
+    ξ_jt            = residuals(ols)
+
     Z = Matrix(df[:,6:11])
     Ω = inv(transpose(Z)*Z)
     objective = (transpose(ξ_jt)*Z)*Ω*(transpose(Z)*ξ_jt) 
-    println("hi5")  
-    return objective
+    return objective, delta_jt
 end
 
 # function add_df_to_GMM(Gamma)
@@ -190,9 +195,57 @@ function do_GMM(Gamma_init)
     return Sol
 end
 
-Gamma_vec = [100,1.2,1.7]
 
-sol = optimize(do_GMM_objective, Gamma_vec, Optim.Options(show_trace=true, iterations = 100, g_tol = 1e-12), LBFGS())
+## TESTING TO FIND PROBLEM WITH Γ
+
+Gamma_vec = [1.0,1.0,1.0]  
+Gamma_21 = Gamma_vec[2]
+Gamma_22 = Gamma_vec[3]
+
+# STORAGE 
+obj = []
+delta_tester = zeros(J*T,3)
+s_tester = zeros(J,3)
+
+for (i, g) in enumerate([1.0, 2.0, 10.0])
+    # unpack gamma
+    Gamma_11                = g
+    Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
+
+    # Test individual share 
+    p_jt                    = df[1:6, 4]
+    x_jt                    = df[1:6, 5]
+    xtilde_jt               = [p_jt x_jt]
+
+    v_i                     = 0.5 .+ zeros(2,1)
+    s_ijt                   = compute_share_jt(delta_init, xtilde_jt, Gamma)
+    s_tester[:,i]           = s_ijt
+
+
+    # Full function
+    obj_val, dvec            = do_GMM_objective(Gamma_vec)
+    push!(obj,obj_val) 
+    delta_tester[:,i]       = dvec
+end
+
+s_tester
+
+
+
+
+println(obj)
+delta_tester
+
+
+
+
+
+
+
+
+
+sol = optimize(do_GMM_objective, Gamma_vec)
+# sol = optimize(do_GMM_objective, Gamma_vec, Optim.Options(show_trace=true, iterations = 100, g_tol = 1e-12), LBFGS())
 Optim.minimizer(sol)
 # optimize(do_GMM_objective(Gamma),Gamma_init,LBFGS())
 
