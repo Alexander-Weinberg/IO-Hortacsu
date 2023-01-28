@@ -14,7 +14,11 @@ Ns = 50
 
 # NUMPARAM
 delta_init      = ones(J,1) ./ J
+<<<<<<< HEAD
 tol_delta       = 1e-14
+=======
+tol_delta       = 1e-8
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
 max_iter_delta  = 10000
 
 v_mat           = randn(2,Ns)
@@ -160,6 +164,7 @@ function do_delta_loop(df, Gamma, delta_init, verbose=false)
     return delt_vec
 end
 
+<<<<<<< HEAD
 function compute_residuals(data)
     # # 2sls using prespec function
     # model = fit(EconometricModel, # package specific type
@@ -195,6 +200,9 @@ function compute_residuals(data)
 end
 
 function GMM_objective(Gamma_vec)
+=======
+function do_GMM_objective(Gamma_vec)
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
     println("Now evaluating obj function.")
     # Build Gamma matrix
     Gamma_11 = Gamma_vec[1]
@@ -218,13 +226,33 @@ function GMM_objective(Gamma_vec)
     Ω_inv                   = inv(transpose(Z)*Z)                         # homoskedasticity
     objective               = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
 
+<<<<<<< HEAD
 
+=======
+    # Manual 2SLS 
+    # TODO: MAKE THIS JUST MATRIX
+    firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
+    p_hat           = predict(firststage)
+    data[!,"phat"]  = p_hat
+    ols             = lm(@formula(delta_jt ~ x + phat), data)
+    ξ_jt            = residuals(ols)
+
+    Z               = Matrix(df[:,6:11])
+    Ω_inv           = inv(transpose(Z)*Z)                         # homoskedasticity
+    objective       = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
+
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
     # robust 
     if isnan(objective)
         objective = 1e10
     end
+<<<<<<< HEAD
 
     return objective, beta
+=======
+    
+    return objective
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
 end
 
 # function add_df_to_GMM(Gamma)
@@ -239,6 +267,7 @@ end
 
 
 
+<<<<<<< HEAD
 
 
 
@@ -251,11 +280,72 @@ val, beta           = GMM_objective(gamma_answer)
 
 
 
+=======
+
+# TESTING THE OPTIMIZER
+Gamma_init = [1.0,1.0,1.0]  
+Sol = optimize(do_GMM_objective, Gamma_init)
+Optim.minimizer(Sol)
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+## TESTING TO FIND PROBLEM WITH Γ
+Gamma_vec = [1.0,1.0,1.0]  
+Gamma_21 = Gamma_vec[2]
+Gamma_22 = Gamma_vec[3]
+
+# Data
+t                       = 1
+market_idx              = (df[:,1] .== t)
+p_jt                    = df[market_idx, 4]
+x_jt                    = df[market_idx, 5]
+s_jt_obs                = df[market_idx, 3]
+xtilde_jt               = [p_jt x_jt]
+
+# s_jt_obs[2]             = 0.01
+
+# STORAGE 
+obj = []
+delta_tester = zeros(J,3)
+s_tester = zeros(J,3)
+delta_init      = zeros(J,1) ./ J
+delta_init[1]   = 5.0
+dvec_list       = []
+
+for (i, g) in enumerate([1.0, 2.0, 10.0])
+    # unpack gamma
+    Gamma_vec               = [g,1.0,1.0]  
+    # Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
+
+    # Test 
+    # dvec, dmat              = do_delta_loop(df, Gamma, delta_init, true)
+    # push!(dvec_list,dvec)
+
+<<<<<<< HEAD
+
+
+
+=======
+    # Full function
+    obj_val, dvec            = do_GMM_objective(Gamma_vec)
+    push!(obj,obj_val) 
+    # delta_tester[:,i]       = dvec
+end
+
+>>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
 
 # break 
 # return 
