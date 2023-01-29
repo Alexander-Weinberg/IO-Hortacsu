@@ -5,34 +5,29 @@
 # ================================ #
 # LOAD PACKAGES
 # ================================ #
-using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim, BlackBoxOptim
+using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim
 
 # PARAM
-T = 100
-J = 6
-Ns = 50
+global T = 100     # should be 100
+global J = 6
+global Ns = 50   # prefer 50
 
 # NUMPARAM
-delta_init      = ones(J,1) ./ J
-<<<<<<< HEAD
-tol_delta       = 1e-14
-=======
-tol_delta       = 1e-8
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
-max_iter_delta  = 10000
+global delta_init      = ones(J,1) ./ J
+global tol_delta       = 1e-14           # prefer 1e-14
+global max_iter_delta  = 10000
 
-v_mat           = randn(2,Ns)
-
-
+# DRAW SHOCKS
 Random.seed!(04211996)
+global v_mat           = randn(2,Ns)
+
 
 
 # ================================ #
 # IMPORT DATA
 # ================================ #
-df = CSV.read("./input/ps1_ex4.csv", DataFrame)
-
-df = df[1:J*T,:]
+df      = CSV.read("./input/ps1_ex4.csv", DataFrame)
+df      = df[1:J*T,:]
 
 # ================================ #
 # INDIVIDUAL SHARE PREDICTION 
@@ -122,7 +117,7 @@ function solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma, verbose=false)
 
         # UPDATE
         if iter_d % 200 == 0 && verbose
-            print("Current iteration is $iter_d. Diff = $diff_delta.\n")  
+            println("Current iteration is $iter_d. Diff = $diff_delta.\n")  
         end
  
     end
@@ -164,8 +159,7 @@ function do_delta_loop(df, Gamma, delta_init, verbose=false)
     return delt_vec
 end
 
-<<<<<<< HEAD
-function compute_residuals(data)
+function compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
     # # 2sls using prespec function
     # model = fit(EconometricModel, # package specific type
     #         @formula(delta_jt  ~ x + (p ~ z1 + z2 + z3 + z4 + z5 + z6)), # @formula(lhs ~ rhs)
@@ -174,21 +168,19 @@ function compute_residuals(data)
     # ξ_jt = residuals(model)
 
     # Regression 2sls 
-    firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
-    p_hat           = predict(firststage)
-    data[!,"phat"]  = p_hat
-    ols             = lm(@formula(delta_jt ~ x + phat), data)
-    ξ_jt            = residuals(ols)
-    beta            = GLM.coef(ols)
+    # firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
+    # p_hat           = predict(firststage)
+    # data[!,"phat"]  = p_hat
+    # ols             = lm(@formula(delta_jt ~ x + phat), data)
+    # ξ_jt            = residuals(ols)
+    # beta            = GLM.coef(ols)
 
     # Manual 2SLS 
     # TODO: MAKE THIS JUST MATRIX
-
-    # xtilde_jt       = hcat(one_jt, Matrix(df[:, 4:5]))
-    # bread1          = inv(transpose(xtilde_jt) * Z * Ω_inv * transpose(Z) * xtilde_jt) * transpose(xtilde_jt) * Z
-    # bread2          = transpose(Z) * delta_jt
-    # β               = bread1 * Ω_inv * bread2
-    # resid_jt        = delta_jt - (xtilde_jt * β) 
+    bread1          = inv(transpose(xtilde_jt) * Z * Ω_inv * transpose(Z) * xtilde_jt) * transpose(xtilde_jt) * Z
+    bread2          = transpose(Z) * delta_jt
+    β               = bread1 * Ω_inv * bread2
+    ξ_jt            = delta_jt - (xtilde_jt * β) 
 
     # # # check matrix vs. reg 
     # diff_resid      = abs.(ξ_jt - resid_jt)
@@ -200,65 +192,34 @@ function compute_residuals(data)
 end
 
 function GMM_objective(Gamma_vec)
-=======
-function do_GMM_objective(Gamma_vec)
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
     println("Now evaluating obj function.")
     # Build Gamma matrix
-    Gamma_11 = Gamma_vec[1]
-    Gamma_21 = Gamma_vec[2]
-    Gamma_22 = Gamma_vec[3]
-    Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    Gamma_11    = Gamma_vec[1]
+    Gamma_21    = Gamma_vec[2]
+    Gamma_22    = Gamma_vec[3]
+    Gamma       = [Gamma_11 0.0; Gamma_21 Gamma_22]
 
     # Get deltas
-    data                    = df[:,4:11]
     delta_jt                = do_delta_loop(df,Gamma,delta_init)
-    data[!,"delta_jt"]      = delta_jt
 
-    # compute residuals
-    one_jt                  = 1 .+ similar(delta_jt)
-    df[!,"ones"]            = one_jt
-    Z                       = hcat(one_jt, Matrix(df[:,5:11]))
+    # Prep data to compute residuals 
+    one_jt                  = ones(size(delta_jt))
+    Z                       = hcat(one_jt, Matrix(df[:,5:11])) # matrix of instruments includes x1 and ones.
+    xtilde_jt               = hcat(one_jt, Matrix(df[:,4:5])) # matrix with ones, p, x1
 
     # compute GMM error
-    ξ_jt, beta              = compute_residuals(data)
+    Ω_inv                   = inv(transpose(Z)*Z)       # homoskedasticity
+    ξ_jt, beta              = compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
 
-    Ω_inv                   = inv(transpose(Z)*Z)                         # homoskedasticity
     objective               = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
 
-<<<<<<< HEAD
-
-=======
-    # Manual 2SLS 
-    # TODO: MAKE THIS JUST MATRIX
-    firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
-    p_hat           = predict(firststage)
-    data[!,"phat"]  = p_hat
-    ols             = lm(@formula(delta_jt ~ x + phat), data)
-    ξ_jt            = residuals(ols)
-
-    Z               = Matrix(df[:,6:11])
-    Ω_inv           = inv(transpose(Z)*Z)                         # homoskedasticity
-    objective       = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
-
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
     # robust 
     if isnan(objective)
         objective = 1e10
     end
-<<<<<<< HEAD
 
     return objective, beta
-=======
-    
-    return objective
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
 end
-
-# function add_df_to_GMM(Gamma)
-#     objective_df = do_GMM_objective(Gamma,delta_init,df)
-#     return objective_df
-# end
 
 function aux_gmm_obj(Gamma_vec)
     objective, beta   = GMM_objective(Gamma_vec)
@@ -266,92 +227,52 @@ function aux_gmm_obj(Gamma_vec)
 end
 
 
-
-<<<<<<< HEAD
-
-
-
+# =======================================
 # TESTING THE OPTIMIZER
-Gamma_init          = [1.0,1.0,1.0]  
-Sol                 = optimize(do_GMM_objective, Gamma_init)
-gamma_answer        = Optim.minimizer(Sol)
+test = false
+if test 
+    Gamma_init          = [1.0,1.0,1.0]  
 
-val, beta           = GMM_objective(gamma_answer)
+    # compile function
+    output              = aux_gmm_obj(Gamma_init)
 
+    # optimize
+    Sol                 = optimize(aux_gmm_obj, Gamma_init)
+    gamma_answer        = Optim.minimizer(Sol)
+    val, beta           = GMM_objective(gamma_answer)               # run to collect β.
 
-
-=======
-
-# TESTING THE OPTIMIZER
-Gamma_init = [1.0,1.0,1.0]  
-Sol = optimize(do_GMM_objective, Gamma_init)
-Optim.minimizer(Sol)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## TESTING TO FIND PROBLEM WITH Γ
-Gamma_vec = [1.0,1.0,1.0]  
-Gamma_21 = Gamma_vec[2]
-Gamma_22 = Gamma_vec[3]
-
-# Data
-t                       = 1
-market_idx              = (df[:,1] .== t)
-p_jt                    = df[market_idx, 4]
-x_jt                    = df[market_idx, 5]
-s_jt_obs                = df[market_idx, 3]
-xtilde_jt               = [p_jt x_jt]
-
-# s_jt_obs[2]             = 0.01
-
-# STORAGE 
-obj = []
-delta_tester = zeros(J,3)
-s_tester = zeros(J,3)
-delta_init      = zeros(J,1) ./ J
-delta_init[1]   = 5.0
-dvec_list       = []
-
-for (i, g) in enumerate([1.0, 2.0, 10.0])
-    # unpack gamma
-    Gamma_vec               = [g,1.0,1.0]  
-    # Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
-
-    # Test 
-    # dvec, dmat              = do_delta_loop(df, Gamma, delta_init, true)
-    # push!(dvec_list,dvec)
-
-<<<<<<< HEAD
-
-
-
-=======
-    # Full function
-    obj_val, dvec            = do_GMM_objective(Gamma_vec)
-    push!(obj,obj_val) 
-    # delta_tester[:,i]       = dvec
+    # print answer
+    Gamma_ans           = [gamma_answer[1] 0.0; gamma_answer[2] gamma_answer[3]]
+    ans_dict            = Dict("β_0"=>beta[1], 
+                                "β_prices"=>beta[2], 
+                                "β_characteristics" => beta[3], 
+                                "Γ"=>Gamma_ans)
+    println("\nSolution = ")
+    ans_dict
 end
 
->>>>>>> 87f933cac61e4574a4bc4068f80db65e897c57e3
 
-# break 
-# return 
+# # Test 1 with reg p on z and then reg d on phat 
+# Solution = 
+# Dict{String, Any} with 4 entries:
+#   "β_0"               => -4.11959
+#   "β_characteristics" => 0.0165052
+#   "Γ"                 => [5.61021 0.0; 7.11146 …
+#   "β_prices"          => 5.40185
 
-# # testing new matrix 2sls
-# do_GMM_objective(Gamma_init)
+# # Test 2 with manual 2sls
+# Solution = 
+# Dict{String, Any} with 4 entries:
+#   "β_0"               => -4.11959
+#   "β_characteristics" => 0.0165052
+#   "Γ"                 => [5.44464 0.0; 6.72845 …
+#   "β_prices"          => 5.40185
+
+# # Speed tests 
+# With T=10, Ns=30, and tol=1e-8 we get speed of .19 seconds per eval. 80 seconds total. 
+
+
+
 
 
 # ## TESTING TO FIND PROBLEM WITH Γ
@@ -371,7 +292,7 @@ end
 
 # # STORAGE 
 # obj = []
-# delta_tester = zeros(J,3)
+# delta_tester = zeros(J,3) 
 # s_tester = zeros(J,3)
 # delta_init      = zeros(J,1) ./ J
 # delta_init[1]   = 5.0
