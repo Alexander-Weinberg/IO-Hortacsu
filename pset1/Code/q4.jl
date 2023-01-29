@@ -21,8 +21,6 @@ global max_iter_delta  = 10000
 Random.seed!(04211996)
 global v_mat           = randn(2,Ns)
 
-
-
 # ================================ #
 # IMPORT DATA
 # ================================ #
@@ -188,7 +186,7 @@ function compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
     # print("Difference is $max_diff_r\n")
     # # # diff_beta       = abs.(ξ_jt - β)
     # # # max_diff        = maximum(diff_resid)
-    return ξ_jt, beta
+    return ξ_jt, β
 end
 
 function GMM_objective(Gamma_vec)
@@ -208,7 +206,7 @@ function GMM_objective(Gamma_vec)
     xtilde_jt               = hcat(one_jt, Matrix(df[:,4:5])) # matrix with ones, p, x1
 
     # compute GMM error
-    Ω_inv                   = inv(transpose(Z)*Z)       # homoskedasticity
+    Ω_inv                   = inv(transpose(Z)*Z)                       # homoskedasticity
     ξ_jt, beta              = compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
 
     objective               = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
@@ -221,23 +219,26 @@ function GMM_objective(Gamma_vec)
     return objective, beta
 end
 
-function aux_gmm_obj(Gamma_vec)
-    objective, beta   = GMM_objective(Gamma_vec)
-    return objective
+function aux_gmm_obj(Gamma_init)
+    val, beta = GMM_objective(Gamma_init)
+    return val
 end
 
 
 # =======================================
 # TESTING THE OPTIMIZER
-test = false
+test = true
 if test 
     Gamma_init          = [1.0,1.0,1.0]  
 
     # compile function
-    output              = aux_gmm_obj(Gamma_init)
+    Sol                 = optimize(aux_gmm_obj, Gamma_init, Optim.Options(iterations = 1))
+    println("Compilation took seconds =", Sol.time_run)
 
     # optimize
     Sol                 = optimize(aux_gmm_obj, Gamma_init)
+    println("Optimization took seconds =", Sol.time_run)
+
     gamma_answer        = Optim.minimizer(Sol)
     val, beta           = GMM_objective(gamma_answer)               # run to collect β.
 
@@ -252,24 +253,10 @@ if test
 end
 
 
-# # Test 1 with reg p on z and then reg d on phat 
-# Solution = 
-# Dict{String, Any} with 4 entries:
-#   "β_0"               => -4.11959
-#   "β_characteristics" => 0.0165052
-#   "Γ"                 => [5.61021 0.0; 7.11146 …
-#   "β_prices"          => 5.40185
-
-# # Test 2 with manual 2sls
-# Solution = 
-# Dict{String, Any} with 4 entries:
-#   "β_0"               => -4.11959
-#   "β_characteristics" => 0.0165052
-#   "Γ"                 => [5.44464 0.0; 6.72845 …
-#   "β_prices"          => 5.40185
-
 # # Speed tests 
-# With T=10, Ns=30, and tol=1e-8 we get speed of .19 seconds per eval. 80 seconds total. 
+# Precompiled objective function. With T=1, Ns=50, and tol=1e-14 we get speed 72 seconds to optimize on first go. 63 on second go. 
+# without precompilation optimization took 61 seconds. With precompilation, 29 seconds. 
+
 
 
 
