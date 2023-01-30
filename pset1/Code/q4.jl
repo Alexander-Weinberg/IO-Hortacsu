@@ -8,9 +8,9 @@
 using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim
 
 # PARAM
-global T = 100     # should be 100
+global T = 1                  # should be 100
 global J = 6
-global Ns = 50   # prefer 50
+global Ns = 50                  # prefer 50
 
 # NUMPARAM
 global delta_init      = ones(J,1) ./ J
@@ -158,13 +158,6 @@ function do_delta_loop(df, Gamma, delta_init, verbose=false)
 end
 
 function compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
-    # # 2sls using prespec function
-    # model = fit(EconometricModel, # package specific type
-    #         @formula(delta_jt  ~ x + (p ~ z1 + z2 + z3 + z4 + z5 + z6)), # @formula(lhs ~ rhs)
-    #         data # a table
-    #         )
-    # ξ_jt = residuals(model)
-
     # Regression 2sls 
     # firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
     # p_hat           = predict(firststage)
@@ -174,18 +167,11 @@ function compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
     # beta            = GLM.coef(ols)
 
     # Manual 2SLS 
-    # TODO: MAKE THIS JUST MATRIX
     bread1          = inv(transpose(xtilde_jt) * Z * Ω_inv * transpose(Z) * xtilde_jt) * transpose(xtilde_jt) * Z
     bread2          = transpose(Z) * delta_jt
     β               = bread1 * Ω_inv * bread2
     ξ_jt            = delta_jt - (xtilde_jt * β) 
 
-    # # # check matrix vs. reg 
-    # diff_resid      = abs.(ξ_jt - resid_jt)
-    # max_diff_r      = maximum(diff_resid)
-    # print("Difference is $max_diff_r\n")
-    # # # diff_beta       = abs.(ξ_jt - β)
-    # # # max_diff        = maximum(diff_resid)
     return ξ_jt, β
 end
 
@@ -202,8 +188,11 @@ function GMM_objective(Gamma_vec)
 
     # Prep data to compute residuals 
     one_jt                  = ones(size(delta_jt))
-    Z                       = hcat(one_jt, Matrix(df[:,5:11])) # matrix of instruments includes x1 and ones.
-    xtilde_jt               = hcat(one_jt, Matrix(df[:,4:5])) # matrix with ones, p, x1
+    # Z                       = hcat(one_jt, Matrix(df[:,5:11])) # matrix of instruments includes x1 and ones.
+    Z                       = Matrix(df[:,5:11]) #  no constant
+    # xtilde_jt               = hcat(one_jt, Matrix(df[:,4:5])) # matrix with ones, p, x1
+    xtilde_jt               = Matrix(df[:,4:5]) # no constant
+
 
     # compute GMM error
     Ω_inv                   = inv(transpose(Z)*Z)                       # homoskedasticity
@@ -254,8 +243,10 @@ end
 
 
 # # Speed tests 
-# Precompiled objective function. With T=1, Ns=50, and tol=1e-14 we get speed 72 seconds to optimize on first go. 63 on second go. 
-# without precompilation optimization took 61 seconds. With precompilation, 29 seconds. 
+# Precompiled objective function. With constant in X, T=1, Ns=50, and tol=1e-14 we get speed 72 seconds to optimize on first go. 63 on second go. 
+# without precompilation optimization took 61 seconds. With precompilation, 29 seconds.
+
+
 
 
 
@@ -299,58 +290,6 @@ end
 #     # delta_tester[:,i]       = dvec
 # end
 
-
-
-
-# for monica 
-# tested and the market_share equations look good. 
-# Vary correctly with delta and Gamma (i.e. delta matters less when g big)
-# update delta looks weird. s_jt_obs[5] is 36% but new delta spit out is negative?
-# do delta loop looks good because converges and deltas vary with gamma
-# Objective function spits out a massive number for gamma = 10, small for gamma = 1
-
-# # testing do delta loop
-# print("\nγ_11=1.0, \t2.0, \t10.0\n\n")
-# diff12 = abs.(dvec_list[1] - dvec_list[2])
-# diff13 = abs.(dvec_list[1] - dvec_list[3])
-# did    = diff12 - diff13
-
-
-
-
-
-
-
-# sol = optimize(do_GMM_objective, Gamma_vec)
-# sol = optimize(do_GMM_objective, Gamma_vec, Optim.Options(show_trace=true, iterations = 100, g_tol = 1e-12), LBFGS())
-# Optim.minimizer(sol)
-# optimize(do_GMM_objective(Gamma),Gamma_init,LBFGS())
-
-
-# # test function. fix gamma. 
-# Gamma_init = [1, 1, 0, 1]
-# Gamma = [1 0; 1 1]
-# # println("--\nmarket 1....T")
-# t = 1
-# market_idx = (df[:,1] .== t)
-
-# # Get the data
-# s_jt_obs = df[market_idx, 3]
-
-# p_jt = df[market_idx, 4]
-# x_jt = df[market_idx, 5]
-# xtilde_jt = [p_jt x_jt]
-# delta_init = similar(delta_init)
-
-# s_jt_obs[1] = .20
-
-# abc = solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma)
-
-# delt_vec = do_delta_loop(df,Gamma,delta_init)
-
-
-
-# do_GMM(Gamma_init)
 
 
 
