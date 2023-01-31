@@ -1,31 +1,31 @@
 # cd("/Users/Monica/Documents/UChicago/Classes/Industrial Organization II")
-# cd("/Users/Monica/Downloads/IO-Hortacsu-main/pset1")
-# println(size(delta_jt),typeof(delta_jt),delta_jt)
+cd("/Users/Monica/Downloads/IO-Hortacsu-main/pset1")
 
 # ================================ #
 # LOAD PACKAGES
 # ================================ #
-using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim
+using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics, GLM, Optim, BlackBoxOptim, LaTeXTabulars 
 
 # PARAM
-global T = 1                  # should be 100
-global J = 6
-global Ns = 50                  # prefer 50
+T = 100
+J = 6
+Ns = 100
 
 # NUMPARAM
-global delta_init      = ones(J,1) ./ J
-global tol_delta       = 1e-14           # prefer 1e-14
-global max_iter_delta  = 10000
+delta_init      = ones(J,1) ./ J
+tol_delta       = 1e-14
+max_iter_delta  = 10000
 
-# DRAW SHOCKS
-Random.seed!(04211996)
-global v_mat           = randn(2,Ns)
+Random.seed!(11221997)
+v_mat           = randn(2,Ns)
+
 
 # ================================ #
 # IMPORT DATA
 # ================================ #
-df      = CSV.read("./input/ps1_ex4.csv", DataFrame)
-df      = df[1:J*T,:]
+df = CSV.read("./input/ps1_ex4.csv", DataFrame)
+
+df = df[1:J*T,:]
 
 # ================================ #
 # INDIVIDUAL SHARE PREDICTION 
@@ -115,7 +115,7 @@ function solve_delta(delta_init, s_jt_obs, xtilde_jt, Gamma, verbose=false)
 
         # UPDATE
         if iter_d % 200 == 0 && verbose
-            println("Current iteration is $iter_d. Diff = $diff_delta.\n")  
+            print("Current iteration is $iter_d. Diff = $diff_delta.\n")  
         end
  
     end
@@ -157,138 +157,223 @@ function do_delta_loop(df, Gamma, delta_init, verbose=false)
     return delt_vec
 end
 
-function compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
+#########################################
+# Function to compute structural errors
+#########################################
+function compute_residuals(data)
+
     # Regression 2sls 
-    # firststage      = lm(@formula(p ~ x + z1 + z2 + z3 + z4 + z5 + z6), data)
-    # p_hat           = predict(firststage)
-    # data[!,"phat"]  = p_hat
-    # ols             = lm(@formula(delta_jt ~ x + phat), data)
-    # ξ_jt            = residuals(ols)
-    # beta            = GLM.coef(ols)
-
-    # Manual 2SLS 
-    bread1          = inv(transpose(xtilde_jt) * Z * Ω_inv * transpose(Z) * xtilde_jt) * transpose(xtilde_jt) * Z
-    bread2          = transpose(Z) * delta_jt
-    β               = bread1 * Ω_inv * bread2
-    ξ_jt            = delta_jt - (xtilde_jt * β) 
-
-    return ξ_jt, β
+    firststage      = lm(@formula(p ~  x + z1 + z2 + z3 + z4 + z5 + z6), data)
+    p_hat           = predict(firststage)
+    data[!,"phat"]  = p_hat
+    
+    ols             = lm(@formula(delta_jt ~  phat + x), data)
+    beta            = GLM.coef(ols)
+    delta_jt        = data.delta_jt
+    x               = data.x
+    p               = data.p
+    ξ_jt            = delta_jt  .-beta[1] - beta[2].*p - beta[3].*x
+   
+    return ξ_jt, beta
 end
 
+################################################
+# Function to calculate GMM objective function
+################################################
 function GMM_objective(Gamma_vec)
     println("Now evaluating obj function.")
     # Build Gamma matrix
-    Gamma_11    = Gamma_vec[1]
-    Gamma_21    = Gamma_vec[2]
-    Gamma_22    = Gamma_vec[3]
-    Gamma       = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    Gamma_11 = Gamma_vec[1]
+    Gamma_21 = Gamma_vec[2]
+    Gamma_22 = Gamma_vec[3]
+    Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
 
     # Get deltas
+    data                    = df[:,4:11]
     delta_jt                = do_delta_loop(df,Gamma,delta_init)
+    data[!,"delta_jt"]      = delta_jt
 
-    # Prep data to compute residuals 
-    one_jt                  = ones(size(delta_jt))
-    # Z                       = hcat(one_jt, Matrix(df[:,5:11])) # matrix of instruments includes x1 and ones.
-    Z                       = Matrix(df[:,5:11]) #  no constant
-    # xtilde_jt               = hcat(one_jt, Matrix(df[:,4:5])) # matrix with ones, p, x1
-    xtilde_jt               = Matrix(df[:,4:5]) # no constant
-
+    # compute residuals
+    one_jt                  = ones(J*T)
+    df.ones                 = one_jt
+    Z                       = hcat(one_jt, Matrix(df[:,5:11]))
+    # Z                       =  Matrix(df[:,6:11])
 
     # compute GMM error
-    Ω_inv                   = inv(transpose(Z)*Z)                       # homoskedasticity
-    ξ_jt, beta              = compute_residuals(delta_jt, xtilde_jt, Z, Ω_inv)
+    ξ_jt, beta              = compute_residuals(data)
 
+    Ω_inv                   = inv(transpose(Z)*Z)                         # homoskedasticity
     objective               = (transpose(ξ_jt)*Z) * Ω_inv * (transpose(Z)*ξ_jt) 
+    # objective               = (transpose(ξ_jt)*Z)  * (transpose(Z)*ξ_jt) 
+    println("Val = $objective")
 
     # robust 
     if isnan(objective)
         objective = 1e10
     end
 
-    return objective, beta
+    return objective, beta, delta_jt
 end
 
-function aux_gmm_obj(Gamma_init)
-    val, beta = GMM_objective(Gamma_init)
-    return val
+################################################
+# Function for non-linear solver to optimize
+################################################
+function aux_gmm_obj(Gamma_vec)
+    objective, beta, delta_jt   = GMM_objective(Gamma_vec)
+    return objective
 end
 
+################################################
+# Function to compute cross-price elasticities
+################################################
+function compute_cprice_elasticity(alpha, s_jt, δ_jt, δ_kt, xtilde_jt, xtilde_kt, Gamma_vec)
+    Gamma_11 = Gamma_vec[1]
+    Gamma_21 = Gamma_vec[2]
+    Gamma_22 = Gamma_vec[3]
+    Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    integrand_ijk = ones(Ns,1)
+    integrand_jk = 0
+    p_kt = xtilde_kt[1]
+    for i in 1:Ns
+        # Draw shock i
+        v_i = v_mat[:,i]
+        
+        # Compute individual shares 
+        share_ijt = compute_share_ijt(δ_jt, xtilde_jt, Gamma, v_i)
+        share_ijt = share_ijt[1]
+        share_ikt = compute_share_ijt(δ_kt, xtilde_kt, Gamma, v_i)
+        share_ikt = share_ikt[1]
 
-# =======================================
-# TESTING THE OPTIMIZER
-test = true
-if test 
-    Gamma_init          = [1.0,1.0,1.0]  
-
-    # compile function
-    Sol                 = optimize(aux_gmm_obj, Gamma_init, Optim.Options(iterations = 1))
-    println("Compilation took seconds =", Sol.time_run)
-
-    # optimize
-    Sol                 = optimize(aux_gmm_obj, Gamma_init)
-    println("Optimization took seconds =", Sol.time_run)
-
-    gamma_answer        = Optim.minimizer(Sol)
-    val, beta           = GMM_objective(gamma_answer)               # run to collect β.
-
-    # print answer
-    Gamma_ans           = [gamma_answer[1] 0.0; gamma_answer[2] gamma_answer[3]]
-    ans_dict            = Dict("β_0"=>beta[1], 
-                                "β_prices"=>beta[2], 
-                                "β_characteristics" => beta[3], 
-                                "Γ"=>Gamma_ans)
-    println("\nSolution = ")
-    ans_dict
+        # Compute elasticity integrals nonparametrically
+        integrand_ijk[i,1] = alpha*p_kt*share_ijt*share_ikt
+        integrand_jk = mean(integrand_ijk, dims = 1)
+        integrand_jk = alpha*p_kt*integrand_jk[1]/s_jt
+    end
+    return integrand_jk
 end
 
+################################################
+# Function to compute own-price elasticities
+################################################
+function compute_oprice_elasticity(alpha, s_jt, δ_jt, xtilde_jt, Gamma_vec)
+    integrand_ijj = ones(Ns, 1)
+    integrand_jj = 0
+    Gamma_11 = Gamma_vec[1]
+    Gamma_21 = Gamma_vec[2]
+    Gamma_22 = Gamma_vec[3]
+    Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    p_jt = xtilde_jt[1]
+    for i in 1:Ns
+        # Draw shock i
+        v_i = v_mat[:,i]
+        
+        # Compute individual shares 
+        share_ijt = compute_share_ijt(δ_jt, xtilde_jt, Gamma, v_i)
+        share_ijt = share_ijt[1]
 
-# # Speed tests 
-# Precompiled objective function. With constant in X, T=1, Ns=50, and tol=1e-14 we get speed 72 seconds to optimize on first go. 63 on second go. 
-# without precompilation optimization took 61 seconds. With precompilation, 29 seconds.
+        # Compute elasticity integrals nonparametrically
+        integrand_ijj[i,1] = share_ijt*(1-share_ijt)
+        integrand_jj = mean(integrand_ijj, dims = 1)
+        integrand_jj = -1*alpha*p_jt*integrand_jj[1]/s_jt   
+    end
+    return integrand_jj[1]
+end
+
+################################################
+# Computes JxJ elasticity matrix
+################################################
+function compute_price_elasticity_matrix(alpha, s_jt, δ_jt, xtilde_jt, Gamma_vec)
+    elasticities = ones(J,J)
+    for j in 1:J
+        for k in 1:J
+            if j != k 
+                elasticities[j,k] = compute_cprice_elasticity(alpha, s_jt[j], δ_jt[j], δ_jt[k], reshape(xtilde_jt[j,1:2],1,2), reshape(xtilde_jt[k,1:2],1,2), Gamma_vec) 
+            else 
+                elasticities[j,k] = compute_oprice_elasticity(alpha, s_jt[j], δ_jt[j], reshape(xtilde_jt[j,1:2],1,2), Gamma_vec)
+            end
+        end
+    end
+    return elasticities    
+end
+
+################################################
+# Computes elasticity matrix for all markets
+################################################
+function loop_price_elasticity(alpha,df,Gamma_vec)
+    Gamma_11 = Gamma_vec[1]
+    Gamma_21 = Gamma_vec[2]
+    Gamma_22 = Gamma_vec[3]
+    Gamma = [Gamma_11 0.0; Gamma_21 Gamma_22]
+    δ_jt                                = do_delta_loop(df,Gamma,delta_init)
+    df.elasticity1                      = ones(T*J)
+    df.elasticity2                      = ones(T*J)
+    df.elasticity3                      = ones(T*J)
+    df.elasticity4                      = ones(T*J)
+    df.elasticity5                      = ones(T*J)
+    df.elasticity6                      = ones(T*J)
+    df[!,"δ_jt"]                        = δ_jt
+    for t in 1:T 
+        market_idx = (df[:,1] .== t)
+        p_jt = df[market_idx, 4]
+        x_jt = df[market_idx, 5]
+        xtilde_jt = [p_jt x_jt]
+        s_jt = df[market_idx, 3]
+        elas_mat = compute_price_elasticity_matrix(alpha, s_jt, δ_jt, xtilde_jt, Gamma_vec)
+        df[market_idx,"elasticity1"] = Vector(elas_mat[:,1]) 
+        df[market_idx,"elasticity2"] = Vector(elas_mat[:,2]) 
+        df[market_idx,"elasticity3"] = Vector(elas_mat[:,3]) 
+        df[market_idx,"elasticity4"] = Vector(elas_mat[:,4]) 
+        df[market_idx,"elasticity5"] = Vector(elas_mat[:,5]) 
+        df[market_idx,"elasticity6"] = Vector(elas_mat[:,6]) 
+    end
+    return df
+end
+
+################################################
+## Perform outer loop using nonlinear solver
+################################################
+Gamma_init          = [1.0,1.0,1.0]  
+Sol                 = optimize(aux_gmm_obj, Gamma_init)
+gamma_answer        = Optim.minimizer(Sol)
+val, beta, delta_jt = GMM_objective(gamma_answer)
+
+################################################
+## Generate matrix of average elasticities
+################################################
+Gamma_vec = gamma_answer
+alpha = -beta[2]
+df_new = loop_price_elasticity(alpha,df,Gamma_vec)
+df_elasticity = hcat(df_new[:,1:2],df_new[:,13:18])
+elasticity = combine(groupby(df_elasticity, ["choice"]), 
+    df -> DataFrame(e1 = mean(df.elasticity1)),
+    df -> DataFrame(e2 = mean(df.elasticity2)),
+    df -> DataFrame(e3 = mean(df.elasticity3)),
+    df -> DataFrame(e4 = mean(df.elasticity4)),
+    df -> DataFrame(e5 = mean(df.elasticity5)),
+    df -> DataFrame(e6 = mean(df.elasticity6))
+)
+elasticity = round.(elasticity, digits = 4)
+
+################################################
+# Output elasticity matrix to LaTeX
+################################################
+labels = ["Product 1", "Product 2", "Product 3", "Product 4", "Product 5" ,"Product 6"]
+elasticity.labels = labels
+elasticity = elasticity[!,[8,2,3,4,5,6,7]]
+elasticity_mat = Matrix(elasticity)
+
+latex_tabular("./Output/blp_elasticities.tex",
+    Tabular(raw"lcccccc"),
+    [Rule(:top),
+    ["", "Product 1", "Product 2", "Product 3", "Product 4", "Product 5", "Product 6"],
+    Rule(:mid),
+    elasticity_mat,
+    Rule(:bottom)]
+)
 
 
 
 
-
-
-
-
-# ## TESTING TO FIND PROBLEM WITH Γ
-# Gamma_vec = [1.0,1.0,1.0]  
-# Gamma_21 = Gamma_vec[2]
-# Gamma_22 = Gamma_vec[3]
-
-# # Data
-# t                       = 1
-# market_idx              = (df[:,1] .== t)
-# p_jt                    = df[market_idx, 4]
-# x_jt                    = df[market_idx, 5]
-# s_jt_obs                = df[market_idx, 3]
-# xtilde_jt               = [p_jt x_jt]
-
-# # s_jt_obs[2]             = 0.01
-
-# # STORAGE 
-# obj = []
-# delta_tester = zeros(J,3) 
-# s_tester = zeros(J,3)
-# delta_init      = zeros(J,1) ./ J
-# delta_init[1]   = 5.0
-
-# for (i, g) in enumerate([1.0, 2.0, 10.0])
-#     # unpack gamma
-#     Gamma_vec               = [g,1.0,1.0]  
-#     # Gamma                   = [Gamma_11 0.0; Gamma_21 Gamma_22]
-
-#     # Test 
-#     # dvec, dmat              = do_delta_loop(df, Gamma, delta_init, true)
-#     # push!(dvec_list,dvec)
-
-#     # Full function
-#     obj_val, dvec            = do_GMM_objective(Gamma_vec)
-#     push!(obj,obj_val) 
-#     # delta_tester[:,i]       = dvec
-# end
 
 
 
