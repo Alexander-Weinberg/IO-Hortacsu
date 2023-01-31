@@ -1,7 +1,7 @@
 # ================================ #
 # LOAD PACKAGES
 # ================================ #
-using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, Statistics
+using CSV, DataFrames, GLM, Optim, Random, LinearAlgebra, LaTeXTabulars, Statistics
 
 # ================================ #
 # IMPORT DATA
@@ -22,7 +22,7 @@ K       = 3
 # grab unique x's for summation. there has got to be simpler way
 x_simple = unique(df, [:choice])
 x_simple = sort!(x_simple, [:choice])
-x_simple = x_simple[1:J,2:4]
+x_simple = x_simple[1:J+1,2:4]
 x_simple = Matrix(x_simple)
 
 # ================================ #
@@ -30,6 +30,7 @@ x_simple = Matrix(x_simple)
 # ================================ #
 function loglike(θ)
     δ = θ[1:J]                      # J x 1 vector 
+    δ = [δ;1]                       # append outside option
     g = θ[J+1:end]                  
     Γ = reshape(g, 2, 3)            # L x K matrix 
 
@@ -47,15 +48,23 @@ function loglike(θ)
         else 
             firstbit    = δ[choice] 
             secondbit   = di * Γ * xj
+            secondbit   = secondbit[1]
         end
-        a           = di * Γ * transpose(x_simple)
-        b           = δ .+  transpose(a)
-        thirdbit    = -log(sum(exp.(b)))
+
+        thirdbit    = -log(sum(exp.(δ + (dmat[i, :]' * Γ * x_simple')')))
 
         # updte likelihood
         likelihood += firstbit 
-        likelihood += secondbit[1] 
-        likelihood -= thirdbit 
+        likelihood += secondbit
+        likelihood += thirdbit 
+
+        # 
+
+        # # Jun and Max
+        # likelihood += 
+
+
+
     end
     return likelihood
 end
@@ -67,10 +76,53 @@ end
 
 
 # # this works
-theta_guess = zeros(J+ (L*K))
-# negloglike(theta_guess)
+theta_guess = ones(J + (L*K))
 
 # OPTIMIZE
 Sol = optimize(negloglike, theta_guess, Optim.Options(iterations = 1)) # warmup
-Sol = optimize(negloglike, theta_guess) # solve
-Sol
+Sol = optimize(negloglike, theta_guess, LBFGS(), autodiff=:forward) # solve
+
+# SOLUTION
+θ_answer = Sol.minimizer
+δ_answer = [θ_answer[1:J];1]
+Γ_answer =  reshape(θ_answer[J+1:end], 2, 3)            # L x K matrix 
+
+
+# delta
+delta = hcat("\$delta_{" .* string.(1:J+1) .* "}\$", round.(δ_answer, digits = 3))
+latex_tabular("./Output/ps1_q2_deltas.tex",
+              Tabular("cc"),
+              [Rule(:top),
+               delta,
+               Rule(:bottom)])
+
+# Gamma
+gamma = hcat("\$gamma_{" .* ["11", "21", "12", "22", "13", "23"] .* "}\$", round.(θ_answer[J+1:end], digits = 3))
+latex_tabular("./Output/ps1_q2_gammas.tex",
+              Tabular("cc"),
+              [Rule(:top),
+              gamma,
+               Rule(:bottom)])
+
+
+# REGRESSION
+
+# Build dataframe
+data = unique(df, [:choice])
+data.delta = δ_answer
+rename!(data,[:choice,:x1, :x2, :x3, :d1, :d2, :delta])
+
+
+# Regression
+ols = lm(@formula(delta ~ -1 + x1 + x2 + x3), data)
+
+# Store estimates
+ξ = data.delta .- predict(ols);
+β = coef(ols);
+   
+beta = hcat("\$\beta_{" .* string.(1:3) .* "}\$", round.(β, digits = 3))
+latex_tabular("output/ps1_q2_betas.tex",
+              Tabular("cc"),
+              [Rule(:top),
+               beta,
+               Rule(:bottom)])
